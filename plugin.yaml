@@ -1,0 +1,20 @@
+name: invinoveritas-receipts
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+description: Signed, independently checkable receipts for Hermes approval verdicts (Guardian LLM by default). Observe-only; never approves or blocks.
+author: invinoveritas
+license: MIT
+homepage: https://github.com/babyblueviper1/hermes-invinoveritas
+tags: [approvals, audit, security, receipts]
+provides_hooks:
+  - post_approval_response
+requires_env:
+  - name: INVINOVERITAS_API_KEY
+    description: "invinoveritas API key (free registration; receipts are paid per call, 100 sats each)"
+    url: "https://invinoveritas.dev"
+    secret: true
+config_schema:
+  scope: {type: str, default: "guardian", description: "guardian = only Guardian LLM (smart) verdicts; all = every approval decision"}
+  api_url: {type: str, default: "https://api.babyblueviper.com", description: "invinoveritas API base URL"}
+  timeout_s: {type: float, default: 10.0, description: "HTTP timeout for one receipt request"}
