@@ -82,7 +82,7 @@ def post_receipt(api_url: str, api_key: str, body: dict, timeout_s: float = 10.0
     """POST /decision-receipt. Returns the parsed response; raises on transport or HTTP errors."""
     req = urllib.request.Request(api_url.rstrip("/") + "/decision-receipt", data=canonical(body), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}",
-                                          "User-Agent": "hermes-invinoveritas/0.1.0"})
+                                          "User-Agent": "hermes-invinoveritas/0.2.0"})
     with urllib.request.urlopen(req, timeout=timeout_s) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -101,3 +101,77 @@ def record(resp: dict, kw: dict, body: dict, nonce: str) -> dict:
         "hermes_choice": kw.get("choice"),
         "verify": "POST the event to https://api.babyblueviper.com/verify-proof (free, no auth)",
     }
+
+
+# ---- turn-end receipts (0.2.0, NousResearch/hermes-agent#16004) ------------------------------------------------
+# When a turn stops on iteration exhaustion, commit to the todo ledger as it stood at that moment, so a completion-shaped
+# reply over unresolved obligations is provable afterwards without trusting the exhausted model's own summary.
+# The ledger is read from the last todo tool result in the turn's conversation (the same JSON the tool returned);
+# only a salted hash of it leaves the machine.
+TURN_QUESTION = "hermes-agent turn end: was the todo ledger complete when the turn stopped?"
+TURN_OPTIONS = ["complete", "incomplete", "no_ledger"]
+_OPEN = ("pending", "in_progress")
+
+
+def ledger_from_history(messages) -> dict | None:
+    """The newest todo tool result in the conversation: {"todos": [...], "summary": {...}}, or None."""
+    for m in reversed(list(messages or [])):
+        if not isinstance(m, dict) or m.get("role") != "tool":
+            continue
+        c = m.get("content")
+        if isinstance(c, list):        # content parts
+            c = "".join(p.get("text", "") for p in c if isinstance(p, dict))
+        if not isinstance(c, str) or '"todos"' not in c:
+            continue
+        try:
+            d = json.loads(c)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(d, dict) and isinstance(d.get("todos"), list):
+            return {"todos": [{"id": str(t.get("id", "")), "content": str(t.get("content", "")),
+                               "status": str(t.get("status", ""))} for t in d["todos"] if isinstance(t, dict)],
+                    "revision": d.get("revision")}
+    return None
+
+
+def turn_choice(ledger: dict | None) -> str:
+    if ledger is None:
+        return "no_ledger"
+    return "incomplete" if any(t["status"] in _OPEN for t in ledger["todos"]) else "complete"
+
+
+def turn_wanted(exit_reason: str, turn_scope: str) -> bool:
+    """exhausted (default): only turns that stopped on max_iterations_reached; all: every turn; off: never."""
+    s = (turn_scope or "exhausted").lower()
+    if s == "off":
+        return False
+    return s == "all" or str(exit_reason or "").startswith("max_iterations_reached")
+
+
+def turn_context(kw: dict, ledger: dict | None, response_sha256: str, nonce: str) -> dict:
+    todos = (ledger or {}).get("todos") or []
+    return {
+        "nonce": nonce,
+        "session_id": kw.get("session_id") or "",
+        "turn_id": kw.get("turn_id") or "",
+        "turn_exit_reason": str(kw.get("turn_exit_reason") or ""),
+        "completed": bool(kw.get("completed")),
+        "ledger": ledger,
+        "open_obligations": sum(1 for t in todos if t["status"] in _OPEN),
+        "total_obligations": len(todos),
+        "final_response_sha256": response_sha256,
+    }
+
+
+def turn_request_body(ctx: dict, choice: str) -> dict:
+    return {
+        "question": TURN_QUESTION,
+        "options": TURN_OPTIONS,
+        "choice": choice,
+        "context_sha256": hashlib.sha256(canonical(ctx)).hexdigest(),
+        "decider": {"provider": "hermes-agent", "model": "turn-ledger", "request_id": ctx["turn_id"]},
+    }
+
+
+def response_sha256(text) -> str:
+    return hashlib.sha256((text if isinstance(text, str) else json.dumps(text, default=str)).encode("utf-8")).hexdigest()

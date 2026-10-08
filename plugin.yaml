@@ -1,14 +1,16 @@
 name: invinoveritas-receipts
-version: 0.1.0
+version: 0.2.0
 manifest_version: 2
 api_version: 1
-description: Signed, independently checkable receipts for Hermes approval verdicts (Guardian LLM by default). Observe-only; never approves or blocks.
+description: Signed, independently checkable receipts for Hermes approval verdicts (Guardian LLM by default) and for turns that stop on iteration exhaustion (the todo ledger at that moment). Observe-only; never approves, blocks or continues.
 author: invinoveritas
 license: MIT
 homepage: https://github.com/babyblueviper1/hermes-invinoveritas
-tags: [approvals, audit, security, receipts]
+tags: [approvals, audit, security, receipts, todos]
 provides_hooks:
   - post_approval_response
+  - post_llm_call
+  - on_session_end
 requires_env:
   - name: INVINOVERITAS_API_KEY
     description: "invinoveritas API key (free registration; receipts are paid per call, 100 sats each)"
@@ -18,3 +20,4 @@ config_schema:
   scope: {type: str, default: "guardian", description: "guardian = only Guardian LLM (smart) verdicts; all = every approval decision"}
   api_url: {type: str, default: "https://api.babyblueviper.com", description: "invinoveritas API base URL"}
   timeout_s: {type: float, default: 10.0, description: "HTTP timeout for one receipt request"}
+  turn_scope: {type: str, default: "exhausted", description: "exhausted = a turn receipt only when the turn stops on max_iterations_reached; all = every turn; off = none"}

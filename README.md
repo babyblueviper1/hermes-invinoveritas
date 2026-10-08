@@ -16,6 +16,20 @@ Anyone can check the signature for free, without an account:
 You alone hold the salt. You can later hand over the salt and the context, and anyone can recompute that this
 exact decision was recorded at that time.
 
+## Turn-end receipts (0.2.0)
+
+When a turn stops on iteration exhaustion (`max_iterations_reached`), the reply that follows is written by a model
+that just ran out of budget, and it can read as finished while the task's own todo list is not
+([hermes-agent#16004](https://github.com/NousResearch/hermes-agent/issues/16004)). From 0.2.0 the plugin also records
+that moment: it reads the turn's newest `todo` tool result (`post_llm_call`) and, when `on_session_end` reports the
+exhaustion, asks for a receipt whose choice is `complete`, `incomplete` or `no_ledger`. The salted context is the
+exit reason, the todo ledger, the open/total obligation counts and the SHA-256 of the final reply. A finished-sounding
+reply over open obligations is then provable later from the receipt, without trusting that reply. Locally, an
+`incomplete` turn also logs one warning with the open count, even without a key.
+
+`turn_scope: exhausted` (default) issues a turn receipt only on `max_iterations_reached`; `all` on every turn;
+`off` never. Like approval receipts, it only observes: it does not continue, retry or block a turn.
+
 ## What it does and does not do
 
 - **Observe-only.** It never approves, denies, delays or changes an approval. The hook returns nothing, never
@@ -28,8 +42,8 @@ exact decision was recorded at that time.
 
 ## Disclosure
 
-- **Network calls.** One HTTPS POST to `https://api.babyblueviper.com/decision-receipt` per recorded decision
-  (configurable with `api_url`). Nothing else is called.
+- **Network calls.** One HTTPS POST to `https://api.babyblueviper.com/decision-receipt` per recorded decision or
+  exhausted turn (configurable with `api_url`). Nothing else is called.
 - **What is sent.** A fixed question, the options `["approve", "deny"]`, the choice, and the SHA-256 of the
   decision context, plus `decider: {provider: "hermes-agent", model: "guardian-llm" | "human", request_id:
   <tool_call_id>}`. The command, description and session key are **not** sent. The context hash includes a
@@ -39,7 +53,7 @@ exact decision was recorded at that time.
   Hermes redacts secrets in Guardian commands). This file is what lets you open a receipt later, so keep it.
 - **Credential.** Reads `INVINOVERITAS_API_KEY` only. Without it, Hermes does not load the plugin.
 - **Cost.** Receipts are paid per call: 100 sats each, from your invinoveritas balance (Lightning, USDC via
-  x402, or card). Registration is free. No telemetry, no background process beyond the per-receipt thread.
+  x402, or card). Registration is free. Turn receipts (default: exhausted turns only) cost the same. No telemetry, no background process beyond the per-receipt thread.
 
 ## Install
 
