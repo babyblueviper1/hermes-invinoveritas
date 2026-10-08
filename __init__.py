@@ -58,8 +58,9 @@ def _issue_turn(kw: dict, cached: dict | None, api_url: str, timeout_s: float) -
         nonce = receipts.new_nonce()
         tctx = receipts.turn_context(kw, ledger, (cached or {}).get("response_sha256", ""), nonce)
         if choice == "incomplete":       # visible locally even without a key or network
-            logger.warning("turn %s stopped (%s) with %d of %d todo obligations unresolved", tctx["turn_id"],
-                           tctx["turn_exit_reason"], tctx["open_obligations"], tctx["total_obligations"])
+            logger.warning("turn %s stopped (%s) with %d todo obligations unresolved (of %s, from %s)", tctx["turn_id"],
+                           tctx["turn_exit_reason"], tctx["open_obligations"], tctx["total_obligations"] or "?",
+                           tctx["ledger_source"])
         key = os.environ.get("INVINOVERITAS_API_KEY", "")
         if not key:
             return

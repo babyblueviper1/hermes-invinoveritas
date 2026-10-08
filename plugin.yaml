@@ -1,5 +1,5 @@
 name: invinoveritas-receipts
-version: 0.2.0
+version: 0.2.1
 manifest_version: 2
 api_version: 1
 description: Signed, independently checkable receipts for Hermes approval verdicts (Guardian LLM by default) and for turns that stop on iteration exhaustion (the todo ledger at that moment). Observe-only; never approves, blocks or continues.

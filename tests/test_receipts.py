@@ -174,3 +174,28 @@ def test_normal_turns_issue_nothing_by_default(tmp_path, monkeypatch):
         if t.name == "invinoveritas-turn-receipt":
             t.join(5)
     assert sent == []
+
+
+# ---- 0.2.1: the list Hermes re-injects after compaction (jamesdwilson's case on #16004) ----
+SNAPSHOT = {"role": "user", "_todo_snapshot_synthetic": True, "content":
+            "[Your active task list was preserved across context compression]\n"
+            "- [>] 3. import three local repositories (in_progress)\n"
+            "  - [ ] 3.1. import repo A (pending)\n"
+            "- [ ] 4. establish a persistent tested supervisor (pending)\n"
+            "- [ ] 5. research and report upstream defects (pending)"}
+
+
+def test_compaction_snapshot_is_a_ledger_and_pending_marker_with_a_space_parses():
+    led = receipts.ledger_from_history([SNAPSHOT])
+    assert led["source"] == "compaction_snapshot" and led.get("partial")
+    assert [(t["id"], t["status"]) for t in led["todos"]] == [("3", "in_progress"), ("3.1", "pending"), ("4", "pending"), ("5", "pending")]
+    assert receipts.turn_choice(led) == "incomplete"
+    c = receipts.turn_context(END, led, "h", "n")
+    assert c["open_obligations"] == 4 and c["total_obligations"] is None and c["ledger_source"] == "compaction_snapshot"
+
+
+def test_newest_of_tool_result_and_snapshot_wins():
+    done = _todo_msg(["completed"])
+    assert receipts.ledger_from_history([done, SNAPSHOT])["source"] == "compaction_snapshot"
+    assert receipts.ledger_from_history([SNAPSHOT, done])["source"] == "todo_result"
+    assert receipts.ledger_from_history([{"role": "assistant", "content": SNAPSHOT["content"]}]) is None   # model echo is not state

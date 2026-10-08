@@ -21,7 +21,7 @@ exact decision was recorded at that time.
 When a turn stops on iteration exhaustion (`max_iterations_reached`), the reply that follows is written by a model
 that just ran out of budget, and it can read as finished while the task's own todo list is not
 ([hermes-agent#16004](https://github.com/NousResearch/hermes-agent/issues/16004)). From 0.2.0 the plugin also records
-that moment: it reads the turn's newest `todo` tool result (`post_llm_call`) and, when `on_session_end` reports the
+that moment: it reads the turn's newest todo state (`post_llm_call`): the last `todo` tool result, or, since 0.2.1, the task list Hermes re-injects after context compression, whichever is newer (`ledger_source` says which; the re-injected list holds only open items, so the total is recorded as unknown). Then, when `on_session_end` reports the
 exhaustion, asks for a receipt whose choice is `complete`, `incomplete` or `no_ledger`. The salted context is the
 exit reason, the todo ledger, the open/total obligation counts and the SHA-256 of the final reply. A finished-sounding
 reply over open obligations is then provable later from the receipt, without trusting that reply. Locally, an

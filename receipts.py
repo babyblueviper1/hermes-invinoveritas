@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import os
 import urllib.error
 import urllib.request
@@ -82,7 +83,7 @@ def post_receipt(api_url: str, api_key: str, body: dict, timeout_s: float = 10.0
     """POST /decision-receipt. Returns the parsed response; raises on transport or HTTP errors."""
     req = urllib.request.Request(api_url.rstrip("/") + "/decision-receipt", data=canonical(body), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}",
-                                          "User-Agent": "hermes-invinoveritas/0.2.0"})
+                                          "User-Agent": "hermes-invinoveritas/0.2.1"})
     with urllib.request.urlopen(req, timeout=timeout_s) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -113,24 +114,49 @@ TURN_OPTIONS = ["complete", "incomplete", "no_ledger"]
 _OPEN = ("pending", "in_progress")
 
 
+TODO_INJECTION_HEADER = "[Your active task list was preserved across context compression]"   # hermes tools/todo_tool.py
+_SNAP_LINE = re.compile(r"^\s*- \[.\] (?P<id>\S+?)\. (?P<content>.*) \((?P<status>pending|in_progress|completed|cancelled)\)\s*$")   # markers [x] [>] [ ] [~]
+
+
+def _text(c) -> str:
+    if isinstance(c, list):        # content parts
+        return "".join(p.get("text", "") for p in c if isinstance(p, dict))
+    return c if isinstance(c, str) else ""
+
+
+def _from_tool_result(c: str) -> dict | None:
+    if '"todos"' not in c:
+        return None
+    try:
+        d = json.loads(c)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(d, dict) and isinstance(d.get("todos"), list):
+        return {"source": "todo_result", "revision": d.get("revision"),
+                "todos": [{"id": str(t.get("id", "")), "content": str(t.get("content", "")),
+                           "status": str(t.get("status", ""))} for t in d["todos"] if isinstance(t, dict)]}
+    return None
+
+
+def _from_snapshot(c: str) -> dict | None:
+    """The list Hermes re-injects after context compression (only active items, so the total is not known)."""
+    if TODO_INJECTION_HEADER not in c:
+        return None
+    todos = [{"id": m["id"], "content": m["content"], "status": m["status"]}
+             for m in (_SNAP_LINE.match(l) for l in c.split(TODO_INJECTION_HEADER, 1)[1].splitlines()) if m]
+    return {"source": "compaction_snapshot", "revision": None, "todos": todos, "partial": True}
+
+
 def ledger_from_history(messages) -> dict | None:
-    """The newest todo tool result in the conversation: {"todos": [...], "summary": {...}}, or None."""
+    """The newest todo state in the conversation: a todo tool result, or the list Hermes re-injects after compaction
+    (NousResearch/hermes-agent#16004: in the field case the obligations survived only as the re-injected list)."""
     for m in reversed(list(messages or [])):
-        if not isinstance(m, dict) or m.get("role") != "tool":
+        if not isinstance(m, dict):
             continue
-        c = m.get("content")
-        if isinstance(c, list):        # content parts
-            c = "".join(p.get("text", "") for p in c if isinstance(p, dict))
-        if not isinstance(c, str) or '"todos"' not in c:
-            continue
-        try:
-            d = json.loads(c)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(d, dict) and isinstance(d.get("todos"), list):
-            return {"todos": [{"id": str(t.get("id", "")), "content": str(t.get("content", "")),
-                               "status": str(t.get("status", ""))} for t in d["todos"] if isinstance(t, dict)],
-                    "revision": d.get("revision")}
+        c = _text(m.get("content"))
+        led = _from_tool_result(c) if m.get("role") == "tool" else (_from_snapshot(c) if m.get("role") in ("user", "system") else None)
+        if led is not None:
+            return led
     return None
 
 
@@ -157,8 +183,9 @@ def turn_context(kw: dict, ledger: dict | None, response_sha256: str, nonce: str
         "turn_exit_reason": str(kw.get("turn_exit_reason") or ""),
         "completed": bool(kw.get("completed")),
         "ledger": ledger,
+        "ledger_source": (ledger or {}).get("source"),
         "open_obligations": sum(1 for t in todos if t["status"] in _OPEN),
-        "total_obligations": len(todos),
+        "total_obligations": None if (ledger or {}).get("partial") else len(todos),
         "final_response_sha256": response_sha256,
     }
 
